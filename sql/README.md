@@ -81,12 +81,21 @@ carry the same thirteen model features — train/score parity.)
 | 14 | `grain_transfer/03_fcc_features_ct.sql` | PROD + DEV | 4 | `teu_features.telecom_features_ct` |
 | 15 | `grain_transfer/04_features_ct.sql` | DEV | 11, 12, 13, 14 | `teu_features.features_ct` |
 | 16 | `features/parcel_features.sql` | DEV | 5, 7, 8, 10, 11, 12, 13 | `teu_features.parcel_features` |
-| 17 | `scoring/01_scaling_params_scan.sql` | DEV | 16 | `teu_analytics.scaling_params` |
+| 17 | `scoring/01_scaling_params_scan.sql` | DEV | 16 | *(read-only scan — see note below)* |
 | 18 | `scoring/02_parcel_score.sql` | DEV | 16 + fitted weights/scaling | `teu_outputs.parcel_scores` |
 | 19 | `scoring/03_delivery.sql` | DEV | 6, 16, 18 + fitted weights/scaling | `teu_outputs.fiber_idx_v1_parcel` |
 
 Steps 3 & 4 read the Census block tables from Stage-0 in addition to step 2's
 `fcc_coverage_summary`.
+
+**Step 17 writes nothing.** `01_scaling_params_scan.sql` is a single `SELECT` that
+returns **one row** of min/max/quantile aggregates over `parcel_features`. Python
+(`scoring/scaling.py :: compute_scaling_params_bq`) consumes that row, applies the
+cap-and-fill rules, and writes the 13-row `teu_analytics.scaling_params` table.
+`modeling.run_training` executes this scan in-process during a refit, so the `.sql`
+exists for review rather than hand-execution — run it only if you want to inspect the
+bounds. Note that the two domain-bounded features (`cable_penetration`,
+`fiber_opportunity_gap`) are absent from the scan by design: their range is fixed `[0,1]`.
 
 ## 5. Scoring files are pipeline-generated
 

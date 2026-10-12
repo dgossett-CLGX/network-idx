@@ -17,11 +17,29 @@ those steps are validated/run in the console.
 (`QueryJobConfig(dry_run=True)`) checks each module's assembled SQL against live
 table schemas — free, non-destructive, catches missing tables/columns/type errors.
 
-> ⚠️ **Step numbers below are this tracker's own and diverge from
-> [`sql/README.md`](../sql/README.md) at step 17+.** This tracker numbers
-> 17 `build_scaling_params` · 18 `build_weights` · 19 `parcel_score`; the SQL runbook
-> numbers 17 `scaling_params` · 18 `parcel_score` · 19 `delivery`. The runbook is the
-> execution contract — follow it when running the pipeline.
+> ⚠️ **The step numbers below are this tracker's own and diverge from
+> [`sql/README.md`](../sql/README.md) at step 17+ — because the two number different
+> kinds of things.** This tracker numbers **Python modules**; the runbook numbers
+> **SQL files**. They cannot line up, because not every module emits SQL:
+>
+> | # | This tracker (modules) | # | `sql/README.md` (SQL files) |
+> |---|---|---|---|
+> | 17 | `scoring.build_scaling_params` | 17 | `scoring/01_scaling_params_scan.sql` |
+> | 18 | `scoring.build_weights` — **retired, module deleted** | — | *no SQL equivalent exists* |
+> | 19 | `scoring.parcel_score` | 18 | `scoring/02_parcel_score.sql` |
+> | — | `scoring.parcel_score :: run_delivery` | 19 | `scoring/03_delivery.sql` |
+>
+> **Weight extraction has no SQL by nature** — it is `mean(|SHAP|)` over a fitted LightGBM
+> model, which cannot be expressed in SQL. It now runs inside `modeling.run_training` →
+> `modeling.fit_rules` → `scoring.weights.write_feature_weights`.
+>
+> **Step 17's SQL is a measurement pass, not a write.** `01_scaling_params_scan.sql` is a
+> single `SELECT` returning one row of aggregates; Python assembles those into the
+> `scaling_params` table. `run_training` executes the scan in-process, so the file exists
+> for review rather than hand-execution.
+>
+> The runbook is the execution contract — follow it when running the pipeline. The rows
+> below are a historical validation log, kept at their original numbering.
 
 ---
 
@@ -78,7 +96,8 @@ Run each `sql/` script in the BigQuery console in this order, then report back s
 | 16 | `features.parcel_features` | VM | ✅ bq-valid (14.93 GB) | `teu_features.parcel_features` | ✅ **rebuilt 2026-09-24 post-F7**: 154,563,179 rows, 17 cols; `dist_to_nearest_fiber_miles` null = 5,920,445 (3.8%, matches step-10 figure exactly — no rows lost in the join); `nearest_fiber_id` 0 numeric-leak (genuine `loc_id` strings); other family nulls unremarkable (cable/housing 0.09%, pop_ch 0.99%, hotspot 33% — different feature, untouched by this fix) |
 | 17 | `scoring.build_scaling_params` | VM | ✅ renders | `teu_analytics.scaling_params` | ✅ validated |
 | 18 | `scoring.build_weights` | VM | ✅ renders | `teu_analytics.feature_weights` | ✅ validated — ⚠️ **module since retired**; weight extraction now runs via `modeling.run_training` → `modeling.fit_rules` → `scoring.weights.write_feature_weights` |
-| 19 | `scoring.parcel_score` | VM | ✅ renders (weights baked) | `teu_outputs.parcel_scores` | ✅ validated |
+| 19 | `scoring.parcel_score` | VM | ✅ renders (weights baked) | `teu_outputs.parcel_scores` | ✅ validated — ⚠️ **SQL regenerated for v2 (Sep 25 04:40) but NOT re-run**: `parcel_scores` (modified 2026-07-28) and `fiber_idx_v1_parcel` (2026-09-18) both predate the v2 refit, so the live tables still hold **v1** scores. Held deliberately pending the QA-9 → QA-1 fixes. |
+| — | `scoring.parcel_score :: run_delivery` | VM | ✅ renders | `teu_outputs.fiber_idx_v1_parcel` | runbook step 19; same v1/v2 caveat as above |
 
 Monitoring and validation modules are pure Python (read + return); not SQL steps.
 

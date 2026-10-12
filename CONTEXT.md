@@ -22,6 +22,15 @@ One of the three thematic components of the index — **growth**, **telecom**,
 **demographic** — each a weighted blend of its bucket's features, rescaled 0–100.
 _Avoid_: category score, group.
 
+**Population & households**:
+The customer-facing name for the **demographic** sub-index. The two are the same thing:
+use "population & households" in anything a customer reads (delivery schemas, business
+docs, dashboards); "demographic" (code: `demo`) remains correct in technical docs, code,
+and BigQuery `bucket` values. Named this way because "demographics" carries fair-lending
+and profiling connotations in a commercial context that the bucket's contents —
+population change and housing unit counts — do not warrant.
+_Avoid_: demographics (in customer-facing contexts), population bucket, household index.
+
 **Opportunity direction**:
 The convention that a *lower* raw value on an inverted feature means *higher*
 opportunity (e.g. less existing fiber, fewer providers).

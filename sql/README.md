@@ -7,7 +7,12 @@ mirror exactly what the pipeline submits to BigQuery.
 
 Hand this folder to the data engineer to run the heavy BQ compute in the console.
 The Python pipeline still orchestrates the ML-specific steps (model fit, weight
-extraction, scaling-param assembly) — those are **not** in this folder.
+extraction, scaling-param assembly) — those are **not** scheduled from this folder.
+
+One exception to watch for: `scoring/01_scaling_params_scan.sql` (step 17) *is*
+checked in here, but only as a readable record of the measurement scan the model fit
+performs. It writes nothing and is not part of the DAG. Everything else in this folder
+is a runnable `CREATE OR REPLACE TABLE`.
 
 ---
 
@@ -27,8 +32,9 @@ To retarget: find-and-replace those two project strings across the folder.
 
 Steps marked **`Reads: PROD`** in the run-order table read a raw source table or
 view from `PROD_PROJECT` and therefore require read access to that project. All
-other steps read only `DEV_PROJECT` tables produced by earlier steps. Every step
-**writes** to `DEV_PROJECT`. Each `.sql` file header also notes where it runs.
+other steps read only `DEV_PROJECT` tables produced by earlier steps. Every scheduled
+step **writes** to `DEV_PROJECT` (step 17, the off-DAG scan, writes nothing). Each
+`.sql` file header also notes where it runs.
 
 ## 3. Prerequisites (land before Stage 1)
 
@@ -40,6 +46,11 @@ other steps read only `DEV_PROJECT` tables produced by earlier steps. Every step
   exist in `PROD_PROJECT`.
 
 ## 4. Run order
+
+> **DE DAG path: steps 1 → 16, then 18 → 19.** Step 17 is a review-only scan that
+> writes nothing — **do not schedule it**. Steps 18 and 19 have *no* runtime dependency
+> on any fitted table; their weights and scaling bounds are baked into the SQL text as
+> literals (see §5). Nothing in the DAG reads `teu_analytics.*`.
 
 Run the scripts in **this exact sequence**. "Depends on" lists the step number(s)
 that must finish first; steps sharing the same dependency may run in any order.
@@ -56,8 +67,9 @@ read access) or only `DEV_PROJECT` tables produced by earlier steps.
 10 ─────> 13 rextag_distance_ct                                                      │
 04 ─────> 14 fcc_features_ct  (PROD+DEV)                                             │
 11,12,13,14 ──> 15 features_ct  (tract training frame)                               │
-                       └──> 16 parcel_features ──> 17 scaling_params
-                                              └──> 18 parcel_score ──> 19 delivery
+                       └──> 16 parcel_features ──> 18 parcel_score ──> 19 delivery
+
+        (17 scaling_params_scan: read-only, off-DAG — see note below)
 ```
 (05 also needs 01; 04 also needs 02 + census blocks. Steps 14→15 are the tract
 training-frame path the model is fit on; 16→19 are the parcel scoring path. Both
@@ -81,21 +93,27 @@ carry the same thirteen model features — train/score parity.)
 | 14 | `grain_transfer/03_fcc_features_ct.sql` | PROD + DEV | 4 | `teu_features.telecom_features_ct` |
 | 15 | `grain_transfer/04_features_ct.sql` | DEV | 11, 12, 13, 14 | `teu_features.features_ct` |
 | 16 | `features/parcel_features.sql` | DEV | 5, 7, 8, 10, 11, 12, 13 | `teu_features.parcel_features` |
-| 17 | `scoring/01_scaling_params_scan.sql` | DEV | 16 | *(read-only scan — see note below)* |
-| 18 | `scoring/02_parcel_score.sql` | DEV | 16 + fitted weights/scaling | `teu_outputs.parcel_scores` |
-| 19 | `scoring/03_delivery.sql` | DEV | 6, 16, 18 + fitted weights/scaling | `teu_outputs.fiber_idx_v1_parcel` |
+| 17 | `scoring/01_scaling_params_scan.sql` | DEV | 16 | ⚪ **nothing — off-DAG, do not schedule** |
+| 18 | `scoring/02_parcel_score.sql` | DEV | 16 | `teu_outputs.parcel_scores` |
+| 19 | `scoring/03_delivery.sql` | DEV | 6, 16, 18 | `teu_outputs.fiber_idx_v1_parcel` |
 
 Steps 3 & 4 read the Census block tables from Stage-0 in addition to step 2's
 `fcc_coverage_summary`.
 
-**Step 17 writes nothing.** `01_scaling_params_scan.sql` is a single `SELECT` that
-returns **one row** of min/max/quantile aggregates over `parcel_features`. Python
-(`scoring/scaling.py :: compute_scaling_params_bq`) consumes that row, applies the
-cap-and-fill rules, and writes the 13-row `teu_analytics.scaling_params` table.
-`modeling.run_training` executes this scan in-process during a refit, so the `.sql`
-exists for review rather than hand-execution — run it only if you want to inspect the
-bounds. Note that the two domain-bounded features (`cable_penetration`,
-`fiber_opportunity_gap`) are absent from the scan by design: their range is fixed `[0,1]`.
+**Step 17 is off-DAG and writes nothing.** `01_scaling_params_scan.sql` is a single
+`SELECT` returning **one row** of min/max/quantile aggregates over `parcel_features`.
+Python (`scoring/scaling.py :: compute_scaling_params_bq`) consumes that row, applies the
+cap-and-fill rules, and writes the 13-row `teu_analytics.scaling_params` table —
+a model-fitting artifact that **no SQL step reads**. `modeling.run_training` executes
+this scan in-process during a refit, so the `.sql` is checked in for review and audit,
+not for scheduling. Run it by hand only to inspect the bounds. Note that the two
+domain-bounded features (`cable_penetration`, `fiber_opportunity_gap`) are absent from
+the scan by design: their range is fixed `[0,1]`.
+
+**Why the numbering skips 17 in the DAG.** The step numbers are stable identifiers,
+baked into each generated file's `Console step:` header and referenced across the docs,
+so 18 and 19 keep their numbers even though 17 is not scheduled. Treat the sequence as
+"1–16, 18, 19", not "1–19".
 
 ## 5. Scoring files are pipeline-generated
 
@@ -112,6 +130,18 @@ GCS_PROJECT_ID=clgx-gis-app-dev-06e3 poetry run python scripts/generate_scoring_
 ```
 
 They are included so the DE can review the final scoring pushdown.
+
+**Checking which run produced the live tables.** Each generated file names its source
+run in its header (`run_id 'lightgbm_k8_v2'`), and steps 18/19 stamp that same `run_id`
+onto every output row. The two can drift — the SQL may be regenerated from a newer fit
+without the DAG having been re-run since. To see what is actually live:
+
+```sql
+SELECT run_id, COUNT(*) FROM `DEV_PROJECT.teu_outputs.parcel_scores` GROUP BY 1;
+```
+
+If that `run_id` differs from the one in the `02_parcel_score.sql` header, the published
+scores are stale relative to the checked-in SQL and steps 18–19 need re-running.
 
 ## 6. Regenerating this folder
 

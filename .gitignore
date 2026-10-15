@@ -10,6 +10,7 @@ __pycache__/
 /notebooks/data/
 /notebooks/temp.*
 /docs/QA.md
+/docs/ip_filing
 
 # Jupyter Notebooks
 .ipynb_checkpoints/

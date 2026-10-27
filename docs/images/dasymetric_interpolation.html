@@ -1,0 +1,133 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  *{box-sizing:border-box;}
+  body{margin:0;padding:30px;font-family:'Segoe UI',Arial,sans-serif;background:#fff;color:#263238;}
+  #wrap{width:1400px;}
+  .top{text-align:center;color:#fff;background:#283593;border-radius:14px;padding:16px 26px;
+       box-shadow:0 3px 10px rgba(0,0,0,.15);}
+  .top .t{font-size:24px;font-weight:800;}
+  .top .s{font-size:14.5px;opacity:.92;margin-top:6px;line-height:1.45;}
+  .steps{display:flex;gap:14px;margin-top:20px;align-items:stretch;}
+  .step{flex:1;border:1px solid #cfd8dc;border-radius:12px;overflow:hidden;background:#fff;
+        box-shadow:0 1px 4px rgba(0,0,0,.07);display:flex;flex-direction:column;}
+  .step .h{color:#fff;padding:10px 14px;}
+  .step .h .k{font-size:11.5px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;opacity:.85;}
+  .step .h .n{font-size:17px;font-weight:800;margin-top:1px;}
+  .step .b{padding:12px 14px;font-size:13.5px;line-height:1.5;color:#37474f;flex:1;}
+  .step .b ul{margin:0;padding-left:17px;} .step .b li{margin-bottom:5px;}
+  .f{font-family:Consolas,Menlo,monospace;font-size:12.5px;background:#f5f7f8;border:1px solid #e3e8ea;
+     border-radius:6px;padding:6px 7px;margin-top:7px;color:#37474f;line-height:1.5;white-space:nowrap;font-size:11.6px;}
+  .s0 .h{background:#546e7a;} .s1 .h{background:#1565c0;} .s2 .h{background:#ef6c00;}
+  .s3 .h{background:#00897b;} .s4 .h{background:#2e7d32;}
+  .arrow{display:flex;align-items:center;color:#90a4ae;font-size:26px;font-weight:800;margin:0 -8px;}
+  .lower{display:flex;gap:18px;margin-top:20px;}
+  .ex{flex:1.55;border:1px solid #cfd8dc;border-radius:12px;padding:14px 16px;}
+  .ex .tt,.cons .tt{font-size:16px;font-weight:800;margin-bottom:4px;}
+  .ex .st{font-size:13px;color:#607d8b;margin-bottom:6px;}
+  .cons{flex:1;border:2px solid #2e7d32;border-radius:12px;padding:14px 16px;background:#f1f8e9;}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px;}
+  th,td{border-bottom:1px solid #dfe5e8;padding:5px 6px;text-align:right;}
+  th{background:#eceff1;font-weight:700;} td:first-child,th:first-child{text-align:left;}
+  tr.tot td{font-weight:800;border-top:2px solid #90a4ae;}
+  .ok{display:inline-block;font-weight:800;color:#1b5e20;background:#c8e6c9;border-radius:16px;
+      padding:4px 12px;margin-top:10px;font-size:13.5px;}
+  .note{font-size:12.5px;color:#546e7a;margin-top:10px;line-height:1.45;}
+  .legend{font-size:12.5px;color:#546e7a;margin-top:2px;}
+  .sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin:0 4px 0 10px;}
+</style></head>
+<body><div id="wrap">
+
+<div class="top">
+  <div class="t">Dasymetric interpolation: FCC place / county coverage &rarr; census blocks</div>
+  <div class="s">FCC publishes coverage summaries for places and counties. We spread each summary's unit total across its
+  census blocks in proportion to Census housing units, so every block gets an estimate &mdash; and the estimates add back up to the FCC totals exactly.</div>
+</div>
+
+<div class="steps">
+  <div class="step s0"><div class="h"><div class="k">Inputs</div><div class="n">Four sources</div></div>
+    <div class="b"><ul>
+      <li><b>FCC place summary</b>: total units + % of units at each technology &times; speed tier</li>
+      <li><b>FCC county summary</b>: same, per county</li>
+      <li><b>Census housing units</b> per block (Address Count Listing) &mdash; the weight</li>
+      <li><b>Census block assignment file</b>: block &rarr; place (if any) and county</li>
+    </ul></div></div>
+  <div class="arrow">&#10148;</div>
+  <div class="step s1"><div class="h"><div class="k">Step 1</div><div class="n">Blocks inside a place</div></div>
+    <div class="b">Spread the place's FCC units by housing share; every block inherits the place's %.
+      <div class="f">w(b) = HU(b) &divide; HU(place)<br>U(b) = units(place) &times; w(b)<br>% (b) = % (place)</div>
+    </div></div>
+  <div class="arrow">&#10148;</div>
+  <div class="step s2"><div class="h"><div class="k">Step 2</div><div class="n">Blocks outside any place</div></div>
+    <div class="b">Take what the county has left after its places, then spread that residual the same way.
+      <div class="f">units(resid) =<br>&nbsp;&nbsp;units(county)<br>&nbsp;&nbsp;&minus; &Sigma; units(place)<br>
+      % (resid) =<br>&nbsp;&nbsp;(county count &minus;<br>&nbsp;&nbsp;&nbsp;&Sigma; place counts)<br>&nbsp;&nbsp;&divide; units(resid)<br>
+      U(b) = units(resid) &times; w(b)</div>
+      <div style="font-size:12.5px;margin-top:6px;color:#607d8b;">Residual clamped at 0; places that cross county lines are split first.</div>
+    </div></div>
+  <div class="arrow">&#10148;</div>
+  <div class="step s3"><div class="h"><div class="k">Step 3</div><div class="n">Roll up to tract</div></div>
+    <div class="b">Sum block counts, then rebuild the %. Weight by the FCC units each block received, <b>not</b> by housing units.
+      <div class="f">count(b) = U(b) &times; % (b)<br>% (tract) =<br>&nbsp;&nbsp;&Sigma; count(b) &divide; &Sigma; U(b)</div>
+    </div></div>
+  <div class="arrow">&#10148;</div>
+  <div class="step s4"><div class="h"><div class="k">Step 4</div><div class="n">Conservation check</div></div>
+    <div class="b">Re-add the block counts to county level and compare with the FCC source. They must match up to rounding; a gap means a bug, so the pipeline <b>halts</b>.
+      <div class="f">&Sigma; count(b in county)<br>&nbsp;&nbsp;= % (county) &times; units(county)</div>
+    </div></div>
+</div>
+
+<div class="lower">
+  <div class="ex">
+    <div class="tt">Worked example &mdash; one county, one place, gigabit fiber share</div>
+    <div class="st">FCC says: County = 1,000 units, 40% gigabit fiber (400 units). Place P = 600 units, 50% (300 units).
+      So the residual outside P = 400 units at (400 &minus; 300) &divide; 400 = <b>25%</b>.</div>
+    <div style="display:flex;gap:16px;align-items:center;">
+      <svg width="470" height="309" viewBox="0 0 380 250">
+        <rect x="4" y="4" width="372" height="226" rx="10" fill="#fff8e1" stroke="#ef6c00" stroke-width="2.5"/>
+        <text x="16" y="24" font-size="13" font-weight="700" fill="#e65100">County C: 1,000 units, 40%</text>
+        <rect x="18" y="38" width="226" height="178" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="2.5" stroke-dasharray="6 3"/>
+        <text x="28" y="56" font-size="12.5" font-weight="700" fill="#0d47a1">Place P: 600 units, 50%</text>
+        <g font-size="12" text-anchor="middle" fill="#263238">
+          <rect x="28" y="66" width="64" height="140" rx="5" fill="#bbdefb" stroke="#1565c0"/>
+          <text x="60" y="118" font-weight="700">B1</text><text x="60" y="136">HU 100</text><text x="60" y="152">U 100</text>
+          <rect x="98" y="66" width="64" height="140" rx="5" fill="#90caf9" stroke="#1565c0"/>
+          <text x="130" y="118" font-weight="700">B2</text><text x="130" y="136">HU 200</text><text x="130" y="152">U 200</text>
+          <rect x="168" y="66" width="68" height="140" rx="5" fill="#64b5f6" stroke="#1565c0"/>
+          <text x="202" y="118" font-weight="700">B3</text><text x="202" y="136">HU 300</text><text x="202" y="152">U 300</text>
+          <rect x="256" y="38" width="108" height="110" rx="5" fill="#ffcc80" stroke="#ef6c00"/>
+          <text x="310" y="80" font-weight="700">R1</text><text x="310" y="98">HU 150</text><text x="310" y="114">U 300</text>
+          <rect x="256" y="156" width="108" height="60" rx="5" fill="#ffe0b2" stroke="#ef6c00"/>
+          <text x="310" y="180" font-weight="700">R2</text><text x="310" y="198">HU 50 &middot; U 100</text>
+        </g>
+        <text x="190" y="246" font-size="11.5" text-anchor="middle" fill="#607d8b">HU = Census housing units (weight) &middot; U = FCC units assigned</text>
+      </svg>
+      <table>
+        <tr><th>Block</th><th>Source</th><th>Share</th><th>U(b)</th><th>%</th><th>Gig count</th></tr>
+        <tr><td>B1</td><td>Place P</td><td>100/600</td><td>100</td><td>50%</td><td>50</td></tr>
+        <tr><td>B2</td><td>Place P</td><td>200/600</td><td>200</td><td>50%</td><td>100</td></tr>
+        <tr><td>B3</td><td>Place P</td><td>300/600</td><td>300</td><td>50%</td><td>150</td></tr>
+        <tr><td>R1</td><td>Residual</td><td>150/200</td><td>300</td><td>25%</td><td>75</td></tr>
+        <tr><td>R2</td><td>Residual</td><td>50/200</td><td>100</td><td>25%</td><td>25</td></tr>
+        <tr class="tot"><td>County</td><td></td><td></td><td>1,000</td><td>40%</td><td>400</td></tr>
+      </table>
+    </div>
+    <div class="note"><b>Tract roll-up:</b> if a tract holds B3 and R1, its share = (150 + 75) &divide; (300 + 300) = <b>37.5%</b> &mdash;
+      weighted by U(b). Note R1 has only 150 housing units but receives 300 FCC units, because the residual's units are spread across only 200 housing units.</div>
+  </div>
+
+  <div class="cons">
+    <div class="tt">Why the totals always balance</div>
+    <div style="font-size:13.5px;line-height:1.55;color:#33691e;">
+      Every block in a place carries the <b>same %</b>, and the place's units are split into shares that sum to 1.
+      So however housing units spread the units, the place's count is unchanged. The same holds for the county residual.
+      <div class="f" style="background:#fff;">50 + 100 + 150 + 75 + 25 = <b>400</b><br>= 40% &times; 1,000 (FCC county figure)</div>
+      <span class="ok">&#10003; Exact, up to rounding</span>
+      <div class="note" style="color:#558b2f;">Checked on every run at county grain (<span style="font-family:Consolas,monospace;">monitoring.data_contract</span>).
+      A breach signals a bug in the share / residual math, not data drift.</div>
+      <div class="note" style="color:#558b2f;"><b>Limitation:</b> every block in a place gets the same %, so street- and
+      neighborhood-level differences within a place are not captured.</div>
+    </div>
+  </div>
+</div>
+
+</div></body></html>
